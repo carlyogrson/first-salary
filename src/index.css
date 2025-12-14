@@ -1,0 +1,27 @@
+:root {
+  font-family: "IBM Plex Sans Arabic", "Cairo", system-ui, -apple-system, sans-serif;
+  color: #111827;
+  background-color: #f7f8fb;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f7f8fb;
+  direction: rtl;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button {
+  font-family: inherit;
+}
