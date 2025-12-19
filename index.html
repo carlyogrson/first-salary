@@ -14,6 +14,19 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      my.getAuthCode({
+  scopes: ['auth_base'],
+  success: (res) => {
+    my.alert({
+      content: res.authCode,
+    });
+  },
+  fail: (res) => {
+      console.log(res.authErrorScopes)
+  },
+});
+    </script>
     <script src="https://cdn.marmot-cloud.com/npm/hylid-bridge/2.10.0/index.js"></script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
