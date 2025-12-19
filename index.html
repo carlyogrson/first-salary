@@ -13,26 +13,37 @@
     />
   </head>
   <body>
-    <button id="loginButton">Login</button>
+     <button id="signinButton">تسجيل الدخول</button>
     <div id="root"></div>
+    <script src="https://cdn.marmot-cloud.com/npm/hylid-bridge/2.10.0/index.js"></script>
     <script>
-      document
-        .getElementById("loginButton")
-        .addEventListener("click", function () {
+      (function() {
+        function callAuth() {
+          if (!window.my) {
+            console.warn('Hylid bridge not ready, retrying...');
+            setTimeout(callAuth, 200);
+            return;
+          }
           my.getAuthCode({
-            scopes: ["auth_base"],
+            scopes: ['auth_base'],
             success: (res) => {
-              my.alert({
-                content: res.authCode,
-              });
+              my.alert({ content: res.authCode });
             },
             fail: (res) => {
               console.log(res.authErrorScopes);
             },
           });
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+          const btn = document.getElementById('signinButton');
+          if (!btn) return;
+          btn.addEventListener('click', function() {
+            callAuth();
+          });
         });
+      })();
     </script>
-    <script src="https://cdn.marmot-cloud.com/npm/hylid-bridge/2.10.0/index.js"></script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
