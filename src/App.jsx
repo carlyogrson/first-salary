@@ -4,24 +4,37 @@ import { styles, theme } from "./styles";
 import "./App.css";
 
 /*
-  Send token to MiniApps auth endpoint to validate Super Qi user
+  Send token to MiniApps auth endpoint to validate Super Qi user.
+  Try primary modern endpoint first, then fall back to legacy endpoint.
 */
-async function authWithSuperQi(token) {
-  const response = await fetch(
-    "http://server.mouamle.space:19990/api/auth-with-superQi",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    }
-  );
+const AUTH_ENDPOINTS = [
+  "https://its.mouamle.space/api/auth-with-superQi",
+  "http://server.mouamle.space:19990/api/auth-with-superQi",
+];
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Auth failed: ${response.status} ${text}`);
+async function authWithSuperQi(token) {
+  for (const url of AUTH_ENDPOINTS) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        console.warn(`Auth failed for ${url}: ${response.status} ${text}`);
+        continue; // try next endpoint
+      }
+
+      return response.json();
+    } catch (err) {
+      console.warn(`Auth request error for ${url}:`, err);
+      // try next endpoint
+    }
   }
 
-  return response.json();
+  throw new Error("All auth endpoints failed");
 }
 
 const STORAGE_KEY = "family-living-calculator";
@@ -122,11 +135,38 @@ export default function App() {
     setAuthError(null);
 
     window.my.getAuthCode({
-      scopes: ["auth_base"],
+      scopes: ["auth_base", "USER_ID"],
       success: async (res) => {
         try {
-          const token = res?.authCode || res?.auth_code || res?.token || "";
-          const result = await authWithSuperQi(token);
+          const authCode = res?.authCode || res?.auth_code || res?.code || "";
+
+          // Forward authCode to merchant backend (if available on platform use my.request)
+          const merchantUrl = "https://merchant.com/api/auth";
+          if (typeof window.my?.request === "function") {
+            try {
+              window.my.request({
+                url: merchantUrl,
+                method: "POST",
+                data: { authCode },
+              });
+            } catch (err) {
+              console.warn("my.request to merchant failed:", err);
+            }
+          } else {
+            // fallback to fetch
+            try {
+              await fetch(merchantUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ authCode }),
+              });
+            } catch (err) {
+              console.warn("fetch to merchant failed:", err);
+            }
+          }
+
+          // Call our auth endpoints with the authCode
+          const result = await authWithSuperQi(authCode);
           setAuthUser(result.user || result);
         } catch (err) {
           setAuthError(err.message || String(err));
@@ -137,7 +177,7 @@ export default function App() {
       fail: (res) => {
         setAuthLoading(false);
         setAuthError(res?.authErrorScopes ? JSON.stringify(res.authErrorScopes) : JSON.stringify(res));
-        console.log(res.authErrorScopes);
+        console.log('Authorization failed:', res?.authErrorScopes || res);
       },
     });
   };
