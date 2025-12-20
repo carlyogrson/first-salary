@@ -1,6 +1,28 @@
 import React, { useEffect, useMemo, useState } from "react";
 import bridge from "./bridge";
 import { styles, theme } from "./styles";
+import "./App.css";
+
+/*
+  Send token to MiniApps auth endpoint to validate Super Qi user
+*/
+async function authWithSuperQi(token) {
+  const response = await fetch(
+    "http://server.mouamle.space:19990/api/auth-with-superQi",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    }
+  );
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Auth failed: ${response.status} ${text}`);
+  }
+
+  return response.json();
+}
 
 const STORAGE_KEY = "family-living-calculator";
 
@@ -46,6 +68,9 @@ export default function App() {
     general: true,
     summary: true,
   });
+  const [authUser, setAuthUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState(null);
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -67,8 +92,55 @@ export default function App() {
     if (bridge.isSuperQi()) {
       setInsideSuperQi(true);
       bridge.ready();
+
+      (async () => {
+        try {
+          const token = window?.HylidBridge?.getAuthToken?.();
+          if (!token) {
+            console.warn("Super Qi bridge present but no auth token available");
+            return;
+          }
+
+          const result = await authWithSuperQi(token);
+          console.log("SuperQi auth result:", result);
+          setAuthUser(result.user || result);
+        } catch (err) {
+          console.error("SuperQi auth error:", err);
+          setAuthError(err.message || String(err));
+        }
+      })();
     }
   }, []);
+
+  const handleMyLogin = () => {
+    if (typeof window?.my?.getAuthCode !== "function") {
+      setAuthError("Platform auth not available");
+      return;
+    }
+
+    setAuthLoading(true);
+    setAuthError(null);
+
+    window.my.getAuthCode({
+      scopes: ["auth_base"],
+      success: async (res) => {
+        try {
+          const token = res?.authCode || res?.auth_code || res?.token || "";
+          const result = await authWithSuperQi(token);
+          setAuthUser(result.user || result);
+        } catch (err) {
+          setAuthError(err.message || String(err));
+        } finally {
+          setAuthLoading(false);
+        }
+      },
+      fail: (res) => {
+        setAuthLoading(false);
+        setAuthError(res?.authErrorScopes ? JSON.stringify(res.authErrorScopes) : JSON.stringify(res));
+        console.log(res.authErrorScopes);
+      },
+    });
+  };
 
   useEffect(() => {
     const count = Math.max(0, Number(form.childrenCount) || 0);
@@ -141,8 +213,23 @@ export default function App() {
               تقدير شهري واقعي للعائلة العراقية • يعمل بدون اتصال • حفظ محلي تلقائي.
             </p>
           </div>
-          <div style={styles.envBadge}>
-            {insideSuperQi ? "داخل Super Qi" : "وضع المتصفح"}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+            <div style={styles.envBadge}>{insideSuperQi ? "داخل Super Qi" : "وضع المتصفح"}</div>
+            {authUser ? (
+              <div style={{ fontSize: 13, fontWeight: 700 }}>مرحباً {authUser.name || authUser.displayName || "مستخدم"}</div>
+            ) : (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={handleMyLogin}
+                  style={{ ...styles.chip, padding: "6px 10px" }}
+                  disabled={authLoading}
+                >
+                  {authLoading ? "جارٍ تسجيل الدخول..." : "تسجيل الدخول"}
+                </button>
+              </div>
+            )}
+            {authError && <div style={{ color: "#b91c1c", fontSize: 12 }}>{authError}</div>}
           </div>
         </div>
 
