@@ -130,62 +130,97 @@ export default function App() {
     }
   }, []);
 
-  const handleMyLogin = () => {
+  // Replaced auth flow: authenticate(), pay(), copyAuthCode()
+  const authCodeRef = React.useRef("");
+  const tokenRef = React.useRef("");
+
+  function authenticate() {
     if (typeof window?.my?.getAuthCode !== "function") {
       setAuthError("Platform auth not available");
       return;
     }
 
-    setAuthLoading(true);
-    setAuthError(null);
-
     window.my.getAuthCode({
       scopes: ["auth_base", "USER_ID"],
-      success: async (res) => {
-        try {
-          const authCode = res?.authCode || res?.auth_code || res?.code || "";
+      success: (res) => {
+        const authCode = res?.authCode || res?.auth_code || res?.code || "";
+        authCodeRef.current = authCode;
+        const el = document.getElementById("authCode");
+        if (el) el.textContent = authCode;
 
-          // Forward authCode to merchant backend (if available on platform use my.request)
-          const merchantUrl = "https://its.mouamle.space/api/auth-with-superQi";
-          if (typeof window.my?.request === "function") {
-            try {
-              window.my.request({
-                url: merchantUrl,
-                method: "POST",
-                data: { authCode },
-              });
-            } catch (err) {
-              console.warn("my.request to merchant failed:", err);
+        fetch("https://its.mouamle.space/api/auth-with-superQi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: authCode }),
+        })
+          .then((r) => r.json())
+          .then((data) => {
+            tokenRef.current = data.token || "";
+            if (typeof window.my?.alert === "function") {
+              window.my.alert({ content: "Login successful" });
             }
-          } else {
-            // fallback to fetch
-            try {
-              await fetch(merchantUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ authCode }),
-              });
-            } catch (err) {
-              console.warn("fetch to merchant failed:", err);
+          })
+          .catch((err) => {
+            let errorDetails = "";
+            if (err && typeof err === "object") {
+              errorDetails = JSON.stringify(err, null, 2);
+            } else {
+              errorDetails = String(err);
             }
-          }
-
-          // Call our auth endpoints with the authCode
-          const result = await authWithSuperQi(authCode);
-          setAuthUser(result.user || result);
-        } catch (err) {
-          setAuthError(err.message || String(err));
-        } finally {
-          setAuthLoading(false);
-        }
+            if (typeof window.my?.alert === "function") {
+              window.my.alert({ content: "Error: " + errorDetails });
+            }
+          });
       },
       fail: (res) => {
-        setAuthLoading(false);
-        setAuthError(res?.authErrorScopes ? JSON.stringify(res.authErrorScopes) : JSON.stringify(res));
-        console.log('Authorization failed:', res?.authErrorScopes || res);
+        console.log(res?.authErrorScopes || res);
       },
     });
-  };
+  }
+
+  function pay() {
+    fetch("https://its.mouamle.space/api/payment", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: tokenRef.current,
+      },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (typeof window?.my === "object" && typeof window.my.tradePay === "function") {
+          window.my.tradePay({
+            paymentUrl: data.url,
+            success: (res) => {
+              if (typeof window.my?.alert === "function") {
+                window.my.alert({ content: "Payment successful" });
+              }
+            },
+            fail: (res) => {
+              if (typeof window.my?.alert === "function") {
+                window.my.alert({ content: "Payment failed" });
+              }
+            },
+          });
+        } else {
+          // fallback: open url (not preferred for in-app requirement)
+          window.location.href = data.url || data.paymentUrl || "";
+        }
+      })
+      .catch((err) => {
+        if (typeof window.my?.alert === "function") {
+          window.my.alert({ content: "Payment failed" });
+        }
+      });
+  }
+
+  function copyAuthCode() {
+    try {
+      navigator.clipboard.writeText(authCodeRef.current || "");
+    } catch (e) {
+      // ignore
+    }
+  }
 
   useEffect(() => {
     const count = Math.max(0, Number(form.childrenCount) || 0);
@@ -263,15 +298,29 @@ export default function App() {
             {authUser ? (
               <div style={{ fontSize: 13, fontWeight: 700 }}>مرحباً {authUser.name || authUser.displayName || "مستخدم"}</div>
             ) : (
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={handleMyLogin}
-                  style={{ ...styles.chip, padding: "6px 10px" }}
-                  disabled={authLoading}
-                >
-                  {authLoading ? "جارٍ تسجيل الدخول..." : "تسجيل الدخول"}
-                </button>
+              <div style={{ display: "flex", gap: 8, flexDirection: 'column', alignItems: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={authenticate}
+                    style={{ ...styles.chip, padding: "6px 10px" }}
+                    disabled={authLoading}
+                  >
+                    {authLoading ? "جارٍ تسجيل الدخول..." : "تسجيل الدخول"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={pay}
+                    style={{ ...styles.chip, padding: "6px 10px", background: '#fff' }}
+                  >
+                    ادفع
+                  </button>
+                </div>
+                <div style={{ fontSize: 12, color: '#fff', opacity: 0.9 }}>AuthCode: <span id="authCode" style={{direction:'ltr',display:'inline-block',minWidth:100,textAlign:'left'}}></span>
+                  <button type="button" onClick={copyAuthCode} style={{ marginLeft: 8, fontSize: 12, padding: '4px 8px', borderRadius: 8 }}>
+                    نسخ
+                  </button>
+                </div>
               </div>
             )}
             {authError && <div style={{ color: "#b91c1c", fontSize: 12 }}>{authError}</div>}
