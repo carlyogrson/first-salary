@@ -3,6 +3,9 @@ import bridge from "./bridge";
 import { styles, theme } from "./styles";
 import "./App.css";
 
+    <script src="https://cdn.marmot-cloud.com/npm/hylid-bridge/2.10.0/index.js"></script>
+
+
 /*
   Send token to MiniApps auth endpoint to validate Super Qi user.
   Try primary modern endpoint first, then fall back to legacy endpoint.
