@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ar">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Super Qi — دفع داخل الميني آب</title>
+  <!-- Hylid / Super Qi bridge (keeps page tiny) -->
+  <script src="https://cdn.marmot-cloud.com/npm/hylid-bridge/2.10.0/index.js"></script>
+  <style>
+    :root{--bg:#f3f4f6;--card:#fff;--accent:#0ea5a4;--muted:#6b7280}
+    html,body{height:100%}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,'Cairo',sans-serif;background:var(--bg);color:#111}
+    .wrap{max-width:540px;margin:0 auto;padding:20px}
+    .header{height:56px;background:#0f172a;color:#fff;display:flex;align-items:center;padding:0 16px;border-radius:10px}
+    .card{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(2,6,23,0.08);margin-top:16px}
+    .btn{display:inline-block;padding:12px 14px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-weight:700;cursor:pointer}
+    .btn.secondary{background:#fff;color:#0f172a;border:1px solid #e6edf2}
+    .muted{color:var(--muted);font-size:13px}
+    .row{display:flex;gap:8px;align-items:center}
+    input[type=number]{flex:1;padding:10px;border-radius:8px;border:1px solid #e6edf2;font-size:16px}
+    .small{font-size:13px;color:var(--muted)}
+  </style>
+</head>
+<body dir="rtl">
+  <div class="wrap">
+    <div class="header">دفع داخل Super Qi</div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:800">إجراء دفع</div>
+        <div class="small">ميني آب خفيف • داخل التطبيق</div>
+      </div>
+
+      <div style="display:grid;gap:10px">
+        <label class="small">المبلغ (د.ع)</label>
+        <div class="row">
+          <input id="amount" type="number" min="1" value="1000" />
+          <button id="payBtn" class="btn">ادفع الآن</button>
+          <button id="loginBtn" class="btn secondary">تسجيل الدخول</button>
+        </div>
+        <div id="status" class="muted">مستعد</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Minimal in-page logic optimized for low bandwidth and Super Qi
+    const statusEl = document.getElementById('status');
+    const payBtn = document.getElementById('payBtn');
+    const loginBtn = document.getElementById('loginBtn');
+    const amountEl = document.getElementById('amount');
+
+    let accessToken = null;
+
+    function setStatus(text, isError) {
+      statusEl.textContent = text;
+      statusEl.style.color = isError ? '#b91c1c' : '';
+    }
+
+    async function login() {
+      setStatus('جاري طلب رمز المصادقة...');
+      if (typeof my?.getAuthCode !== 'function') {
+        setStatus('واجهة المصادقة غير متاحة', true);
+        return;
+      }
+
+      my.getAuthCode({
+        scopes: ['USER_ID'],
+        success: async (res) => {
+          const authCode = res?.authCode || res?.auth_code || res?.code;
+          if (!authCode) {
+            setStatus('لم يتم استلام authCode', true);
+            return;
+          }
+
+          setStatus('إرسال authCode إلى الخادم...');
+          try {
+            const r = await fetch('https://its.mouamle.space/api/auth-with-superQi', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: authCode })
+            });
+
+            if (!r.ok) throw new Error('auth failed');
+            const data = await r.json();
+            accessToken = data.token || data.accessToken || data.authToken || null;
+            if (!accessToken) throw new Error('no token in response');
+
+            setStatus('تم تسجيل الدخول ✅');
+            my?.alert?.({ content: 'تم تسجيل الدخول' });
+          } catch (err) {
+            setStatus('فشل تسجيل الدخول', true);
+            my?.alert?.({ content: 'فشل تسجيل الدخول' });
+          }
+        },
+        fail: (err) => {
+          setStatus('تم إلغاء المصادقة', true);
+        }
+      });
+    }
+
+    async function payInside() {
+      if (!accessToken) {
+        setStatus('سجّل دخول أولاً', true);
+        my?.alert?.({ content: 'سجّل دخول أولاً' });
+        return;
+      }
+
+      const amt = Number(amountEl.value) || 0;
+      if (amt <= 0) {
+        setStatus('المبلغ غير صالح', true);
+        return;
+      }
+
+      setStatus('طلب عنوان الدفع من الخادم...');
+
+      try {
+        const r = await fetch('https://its.mouamle.space/api/payment', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': accessToken
+          },
+          body: JSON.stringify({ amount: amt })
+        });
+
+        if (!r.ok) throw new Error('payment create failed');
+        const data = await r.json();
+        const paymentUrl = data?.url || data?.paymentUrl || data?.tradeNO || null;
+        if (!paymentUrl) throw new Error('no payment url');
+
+        setStatus('فتح شاشة الدفع داخل Super Qi...');
+
+        if (typeof my?.tradePay === 'function') {
+          my.tradePay({
+            paymentUrl,
+            success: (res) => {
+              setStatus('تم الدفع بنجاح ✅');
+              my?.alert?.({ content: 'تم الدفع بنجاح' });
+            },
+            fail: (err) => {
+              setStatus('فشل الدفع ❌', true);
+              my?.alert?.({ content: 'فشل الدفع' });
+            }
+          });
+        } else {
+          // As a safety fallback — but requirement is fully in-app, so prefer JSAPI
+          window.location.href = paymentUrl;
+        }
+      } catch (err) {
+        setStatus('خطأ أثناء إنشاء الدفع', true);
+        my?.alert?.({ content: 'خطأ أثناء الدفع' });
+      }
+    }
+
+    // Bind UI
+    loginBtn.addEventListener('click', login);
+    payBtn.addEventListener('click', payInside);
+  </script>
+</body>
+</html>
