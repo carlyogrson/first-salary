@@ -12,7 +12,6 @@ import "./App.css";
 */
 const AUTH_ENDPOINTS = [
   "https://its.mouamle.space/api/auth-with-superQi",
-  "http://server.mouamle.space:19990/api/auth-with-superQi",
 ];
 
 // Merchant/backend endpoint to request a payment URL (adjust as needed)
@@ -147,7 +146,7 @@ export default function App() {
           const authCode = res?.authCode || res?.auth_code || res?.code || "";
 
           // Forward authCode to merchant backend (if available on platform use my.request)
-          const merchantUrl = "https://merchant.com/api/auth";
+          const merchantUrl = "https://its.mouamle.space/api/auth-with-superQi";
           if (typeof window.my?.request === "function") {
             try {
               window.my.request({
