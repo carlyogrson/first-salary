@@ -12,6 +12,9 @@ const AUTH_ENDPOINTS = [
   "http://server.mouamle.space:19990/api/auth-with-superQi",
 ];
 
+// Merchant/backend endpoint to request a payment URL (adjust as needed)
+const PAYMENT_ENDPOINT = "/api/payment/create"; // POST { amount }
+
 async function authWithSuperQi(token) {
   for (const url of AUTH_ENDPOINTS) {
     try {
@@ -620,6 +623,7 @@ export default function App() {
             إغلاق الميني آب
           </button>
         )}
+      <PaymentCard totals={totals} />
       </div>
     </div>
   );
@@ -650,6 +654,175 @@ function SummaryRow({ label, value, color }) {
         {label}
       </div>
       <div style={styles.rowValue}>{formatCurrency(value)} د.ع</div>
+    </div>
+  );
+}
+
+// Lightweight payment UI optimized for Mini App environments
+function PaymentCard({ totals }) {
+  const [amount, setAmount] = useState(
+    Math.max(1000, Math.abs(Math.round(totals.balance || 0)))
+  );
+  const [loading, setLoading] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
+  const abortControllerRef = React.useRef(null);
+
+  const requestPaymentUrl = async (amt) => {
+    setError(null);
+    setLoading(true);
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    const ac = new AbortController();
+    abortControllerRef.current = ac;
+
+    try {
+      const res = await fetch(PAYMENT_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: Number(amt) }),
+        signal: ac.signal,
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Payment endpoint error: ${res.status} ${txt}`);
+      }
+
+      const data = await res.json();
+      const paymentUrl = data?.paymentUrl || data?.url || data?.tradeNO || "";
+      if (!paymentUrl) throw new Error("Invalid payment URL from server");
+
+      // Trigger MiniApp JSAPI if available, otherwise fallback to navigation
+      setProcessing(true);
+      if (typeof window?.my === "object" && typeof window.my.tradePay === "function") {
+        try {
+          window.my.tradePay({
+            tradeNO: paymentUrl,
+            tradeUrl: paymentUrl,
+            success: (res) => {
+              setProcessing(false);
+              setError(null);
+            },
+            fail: (res) => {
+              setProcessing(false);
+              setError(res && res.error ? String(res.error) : JSON.stringify(res));
+            },
+          });
+        } catch (err) {
+          setProcessing(false);
+          setError(err.message || String(err));
+        }
+      } else {
+        // Fallback: redirect browser to payment URL
+        try {
+          window.location.href = paymentUrl;
+        } catch (err) {
+          setProcessing(false);
+          setError(err.message || String(err));
+        }
+      }
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Simple server-backed payment flow (from user snippet)
+  const pay = async () => {
+    setError(null);
+    setProcessing(true);
+    try {
+      const token = window?.HylidBridge?.getAuthToken?.() || "";
+
+      const res = await fetch("https://its.mouamle.space/api/payment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token,
+        },
+      });
+
+      const data = await res.json();
+
+      if (typeof window?.my === "object" && typeof window.my.tradePay === "function") {
+        window.my.tradePay({
+          paymentUrl: data.url,
+          success: (r) => {
+            setProcessing(false);
+            setError(null);
+            if (typeof window.my.alert === "function") {
+              window.my.alert({ content: "Payment successful" });
+            }
+          },
+          fail: (r) => {
+            setProcessing(false);
+            setError(r && r.error ? String(r.error) : JSON.stringify(r));
+            if (typeof window.my.alert === "function") {
+              window.my.alert({ content: "Payment failed" });
+            }
+          },
+        });
+      } else {
+        // fallback: navigate to returned URL
+        window.location.href = data.url || data.paymentUrl || "";
+      }
+    } catch (err) {
+      setProcessing(false);
+      setError(err.message || String(err));
+      if (typeof window?.my?.alert === "function") {
+        window.my.alert({ content: "Payment failed" });
+      }
+    }
+  };
+
+  return (
+    <div style={styles.card}>
+      <div style={styles.sectionHeader}>
+        <div>
+          <p style={styles.miniLabel}>دفع عبر المحفظة</p>
+          <h3 style={styles.blockTitle}>عملية دفع سريعة</h3>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gap: 10 }}>
+        <label style={styles.label}>المبلغ (د.ع)</label>
+        <div style={styles.inputShell}>
+          <input
+            type="number"
+            inputMode="numeric"
+            min="1"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            style={styles.input}
+            aria-label="amount"
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => requestPaymentUrl(amount)}
+              style={{ ...styles.chip, minWidth: 120 }}
+              disabled={loading || processing}
+            >
+              {loading || processing ? "جارٍ المعالجة..." : "ادفع الآن"}
+            </button>
+            <button
+              type="button"
+              onClick={pay}
+              style={{ ...styles.chip, minWidth: 120, background: "#fff" }}
+              disabled={loading || processing}
+            >
+              ادفع عبر الخادم
+            </button>
+          </div>
+        </div>
+
+        {error && <div style={{ color: "#b91c1c", fontSize: 13 }}>{error}</div>}
+        <div style={{ color: theme.colors.muted, fontSize: 13 }}>
+          الميني آب يستخدم `my.tradePay` عندما يتوفر، وإلا يتم التحويل إلى المتصفح.
+        </div>
+      </div>
     </div>
   );
 }
